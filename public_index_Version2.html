@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Loan Tracker</title>
+  <meta charset="utf-8" />
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2em; }
+    .hidden { display: none; }
+    .container { margin-bottom: 2em; }
+    label { display: block; margin-top: 1em; }
+    input, button, select { margin-top: .5em; }
+    table { border-collapse: collapse; margin-top: 1em; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: .5em; }
+  </style>
+</head>
+<body>
+  <h1>Loan Tracker Demo</h1>
+  <div class="container" id="login-container">
+    <h2>Login</h2>
+    <form id="login-form">
+      <label>Username: <input id="username" required></label>
+      <label>Password: <input id="password" type="password" required></label>
+      <button type="submit">Login</button>
+    </form>
+    <div id="login-error" style="color:red"></div>
+    <p>Demo logins: <b>admin/admin</b>, <b>user/user</b></p>
+  </div>
+
+  <div class="container hidden" id="admin-container">
+    <h2>Admin Panel</h2>
+    <form id="create-loan-form">
+      <label>User:
+        <select id="loan-user"></select>
+      </label>
+      <label>Total Amount: <input id="loan-amount" type="number" min="1" required></label>
+      <label>Interest Rate (%): <input id="loan-interest" type="number" min="0" step="0.01" required></label>
+      <button type="submit">Create Loan</button>
+    </form>
+    <h3>All Loans</h3>
+    <table id="admin-loans">
+      <thead>
+        <tr><th>ID</th><th>User</th><th>Total</th><th>Rate</th><th>Balance</th><th>Created</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <button onclick="logout()">Logout</button>
+  </div>
+
+  <div class="container hidden" id="user-container">
+    <h2>User Panel</h2>
+    <h3>My Loans</h3>
+    <table id="user-loans">
+      <thead>
+        <tr><th>ID</th><th>Total</th><th>Rate</th><th>Balance</th><th>Actions</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div id="loan-actions" class="hidden">
+      <h4>Loan Actions (ID: <span id="active-loan-id"></span>)</h4>
+      <form id="withdraw-form">
+        <label>Withdraw Amount: <input id="withdraw-amount" type="number" min="1"></label>
+        <button type="submit">Withdraw</button>
+      </form>
+      <form id="repay-form">
+        <label>Repay Amount: <input id="repay-amount" type="number" min="1"></label>
+        <button type="submit">Repay</button>
+      </form>
+      <h4>Transactions</h4>
+      <table id="loan-txs">
+        <thead>
+          <tr><th>Type</th><th>Amount</th><th>Description</th><th>When</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <button onclick="logout()">Logout</button>
+  </div>
+
+<script>
+let token = null;
+let userId = null;
+let role = null;
+let activeLoanId = null;
+
+function show(id) {
+  document.getElementById('login-container').classList.add('hidden');
+  document.getElementById('admin-container').classList.add('hidden');
+  document.getElementById('user-container').classList.add('hidden');
+  document.getElementById('loan-actions').classList.add('hidden');
+  document.getElementById(id).classList.remove('hidden');
+}
+
+function logout() {
+  token = null; userId = null; role = null;
+  show('login-container');
+}
+
+document.getElementById('login-form').onsubmit = async (e) => {
+  e.preventDefault();
+  document.getElementById('login-error').textContent = '';
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+  const r = await fetch('/api/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password })
+  });
+  if (r.ok) {
+    const data = await r.json();
+    token = data.token; userId = data.userId; role = data.role;
+    if (role === 'admin') initAdmin(); else initUser();
+  } else {
+    document.getElementById('login-error').textContent = 'Invalid credentials';
+  }
+};
+
+async function initAdmin() {
+  show('admin-container');
+  // Fill user select
+  const users = await (await fetch('/api/demo-users')).json();
+  const userSelect = document.getElementById('loan-user');
+  userSelect.innerHTML = '';
+  users.filter(u => u.role === 'user').forEach(u => {
+    const opt = document.createElement('option');
+    opt.value = u.id; opt.textContent = u.username;
+    userSelect.appendChild(opt);
+  });
+  // Loan creation
+  document.getElementById('create-loan-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const userId = userSelect.value;
+    const totalAmount = document.getElementById('loan-amount').value;
+    const interestRate = document.getElementById('loan-interest').value;
+    await fetch('/api/loans', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: token },
+      body: JSON.stringify({ userId, totalAmount, interestRate })
+    });
+    loadAdminLoans();
+  };
+  loadAdminLoans();
+}
+
+async function loadAdminLoans() {
+  const r = await fetch('/api/loans', { headers: { Authorization: token } });
+  const loans = await r.json();
+  const tbody = document.getElementById('admin-loans').querySelector('tbody');
+  tbody.innerHTML = '';
+  loans.forEach(l => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${l.id}</td><td>${l.username}</td><td>${l.total_amount}</td><td>${l.interest_rate}</td><td>${l.balance}</td><td>${l.created_at}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function initUser() {
+  show('user-container');
+  loadUserLoans();
+}
+
+async function loadUserLoans() {
+  const r = await fetch('/api/myloans', { headers: { Authorization: token } });
+  const loans = await r.json();
+  const tbody = document.getElementById('user-loans').querySelector('tbody');
+  tbody.innerHTML = '';
+  loans.forEach(l => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${l.id}</td><td>${l.total_amount}</td><td>${l.interest_rate}</td><td>${l.balance}</td>
+      <td><button onclick="selectLoan(${l.id})">View/Actions</button></td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function selectLoan(loanId) {
+  activeLoanId = loanId;
+  document.getElementById('active-loan-id').textContent = loanId;
+  document.getElementById('loan-actions').classList.remove('hidden');
+  // Withdraw
+  document.getElementById('withdraw-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const amt = document.getElementById('withdraw-amount').value;
+    await fetch(`/api/loans/${loanId}/withdraw`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: token },
+      body: JSON.stringify({ amount: amt })
+    });
+    loadUserLoans();
+    showLoanTxs();
+  };
+  // Repay
+  document.getElementById('repay-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const amt = document.getElementById('repay-amount').value;
+    await fetch(`/api/loans/${loanId}/repay`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: token },
+      body: JSON.stringify({ amount: amt })
+    });
+    loadUserLoans();
+    showLoanTxs();
+  };
+  showLoanTxs();
+}
+
+async function showLoanTxs() {
+  const r = await fetch(`/api/loans/${activeLoanId}`, { headers: { Authorization: token } });
+  const data = await r.json();
+  const tbody = document.getElementById('loan-txs').querySelector('tbody');
+  tbody.innerHTML = '';
+  data.transactions.forEach(tx => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${tx.type}</td><td>${tx.amount}</td><td>${tx.description}</td><td>${tx.timestamp}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+</script>
+</body>
+</html>
